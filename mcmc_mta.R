@@ -21,64 +21,32 @@ library(stringr)
 
 setwd('C:/Users/xqian/Documents/GitHub/mta-with-markov-chains')
 
+df1 <- read.csv('path to conversion.csv', stringsAsFactors = FALSE)
+lu <- read.csv('lookup placement.csv', stringsAsFactors = FALSE)
 
-##### simple example #####
-# creating a data sample
-df1 <- data.frame(path = c('c1 > c2 > c3', 'c1', 'c2 > c3'), conv = c(1, 0, 0), conv_null = c(0, 1, 1))
+df <- merge(df1, lu, by="Placement")
 
-# calculating the model
-mod1 <- markov_model(df1,
-                     var_path = 'path',
-                     var_conv = 'conv',
-                     var_null = 'conv_null',
-                     out_more = TRUE)
+df <- df[,c(2,3,4,5,6,12,13)]
+df <- df %>% filter(!Tactic %in% c('Tablet','Desktop','Incremental Cross Device'))
 
-# extracting the results of attribution
-df_res1 <- mod1$result
+level <- 'Tactic'
 
-# extracting a transition matrix
-df_trans1 <- mod1$transition_matrix
-df_trans1 <- dcast(df_trans1, channel_from ~ channel_to, value.var = 'transition_probability')
-
-### plotting the Markov graph ###
-df_trans <- mod1$transition_matrix
-
-# adding dummies in order to plot the graph
-df_dummy <- data.frame(channel_from = c('(start)', '(conversion)', '(null)'),
-                       channel_to = c('(start)', '(conversion)', '(null)'),
-                       transition_probability = c(0, 1, 1))
-df_trans <- rbind(df_trans, df_dummy)
-
-# ordering channels
-df_trans$channel_from <- factor(df_trans$channel_from,
-                                levels = c('(start)', '(conversion)', '(null)', 'c1', 'c2', 'c3'))
-df_trans$channel_to <- factor(df_trans$channel_to,
-                              levels = c('(start)', '(conversion)', '(null)', 'c1', 'c2', 'c3'))
-df_trans <- dcast(df_trans, channel_from ~ channel_to, value.var = 'transition_probability')
-
-# creating the markovchain object
-trans_matrix <- matrix(data = as.matrix(df_trans[, -1]),
-                       nrow = nrow(df_trans[, -1]), ncol = ncol(df_trans[, -1]),
-                       dimnames = list(c(as.character(df_trans[, 1])), c(colnames(df_trans[, -1]))))
-trans_matrix[is.na(trans_matrix)] <- 0
-trans_matrix1 <- new("markovchain", transitionMatrix = trans_matrix)
-
-# plotting the graph
-plot(trans_matrix1, edge.arrow.size = 0.35)
+df_int <- df[,c('Conversion.ID','Interaction.Date.Time',level)]
+df_conv <- df[,c('Conversion.ID','Activity.Date.Time','Activity')]
+df_conv <- df_conv %>%
+  group_by(Conversion.ID) %>%
+  summarise(conversion_time = max(Activity.Date.Time))
+df_conv$conversion_time <- as.POSIXct(df_conv$conversion_time, format="%m/%d/%Y %H:%M", tz=Sys.timezone())
 
 
+colnames(df_int) <- c('client_id','date','channel')
 
 ##### simulating the "real" data####
-set.seed(354)
-df2 <- data.frame(client_id = sample(c(1:1000), 5000, replace = TRUE),
-                  date = sample(c(1:32), 5000, replace = TRUE),
-                  channel = sample(c(0:9), 5000, replace = TRUE,
-                                   prob = c(0.1, 0.15, 0.05, 0.07, 0.11, 0.07, 0.13, 0.1, 0.06, 0.16)))
-df2$date <- as.Date(df2$date, origin = "2015-01-01")
-df2$channel <- paste0('channel_', df2$channel)
+
+df_int$date <- as.POSIXct(df_int$date, format="%m/%d/%Y %H:%M", tz=Sys.timezone())
 
 # aggregating channels to the paths for each customer
-df2 <- df2 %>%
+df2 <- df_int %>%
   arrange(client_id, date) %>%
   group_by(client_id) %>%
   summarise(path = paste(channel, collapse = ' > '),
@@ -94,35 +62,16 @@ mod2 <- markov_model(df2,
                      var_null = 'conv_null',
                      out_more = TRUE)
 
-# heuristic_models() function doesn't work for me, therefore I used the manual calculations
-# instead of:
-#h_mod <- heuristic_models(df2, var_path = 'path', var_conv = 'conv')
-
-df_hm <- df2 %>%
-  mutate(channel_name_ft = sub('>.*', '', path),
-         channel_name_ft = sub(' ', '', channel_name_ft),
-         channel_name_lt = sub('.*>', '', path),
-         channel_name_lt = sub(' ', '', channel_name_lt))
-# first-touch conversions
-df_ft <- df_hm %>%
-  group_by(channel_name_ft) %>%
-  summarise(first_touch_conversions = sum(conv)) %>%
-  ungroup()
-# last-touch conversions
-df_lt <- df_hm %>%
-  group_by(channel_name_lt) %>%
-  summarise(last_touch_conversions = sum(conv)) %>%
-  ungroup()
-
-h_mod2 <- merge(df_ft, df_lt, by.x = 'channel_name_ft', by.y = 'channel_name_lt')
+# heuristic_models()
+h_mod2 <- heuristic_models(df2, var_path = 'path', var_conv = 'conv')
 
 # merging all models
-all_models <- merge(h_mod2, mod2$result, by.x = 'channel_name_ft', by.y = 'channel_name')
-colnames(all_models)[c(1, 4)] <- c('channel_name', 'attrib_model_conversions')
+all_models <- merge(h_mod2, mod2$result, by = 'channel_name')
+colnames(all_models)[c(5)] <- c('attrib_model_conversions')
 
 
 ############## visualizations ##############
-# transition matrix heatmap for "real" data
+# transition matrix heatmap
 df_plot_trans <- mod2$transition_matrix
 
 cols <- c("#e7f0fa", "#c9e2f6", "#95cbee", "#0099dc", "#4ab04a", "#ffd73e", "#eec73a",
@@ -184,113 +133,35 @@ ggplot(all_mod_plot, aes(x = conv_type, y = value, group = channel_name)) +
   ggtitle('Models comparison') +
   guides(colour = guide_legend(override.aes = list(size = 4)))
 
+###################################################
+##### Customer journey duration #####
 
+colnames(df_conv) <- c('client_id','date')
+df_conv$channel <- 'Quote Start'
+df_conv$conversion <- 1
 
-##### simulating the "real" data with >1 conversions per id #####
-set.seed(454)
-df_raw <- data.frame(customer_id = paste0('id', sample(c(1:20000), replace = TRUE)), date = as.Date(rbeta(80000, 0.7, 10) * 100, origin = "2016-01-01"), channel = paste0('channel_', sample(c(0:7), 80000, replace = TRUE, prob = c(0.2, 0.12, 0.03, 0.07, 0.15, 0.25, 0.1, 0.08))) ) %>%
-  group_by(customer_id) %>%
-  mutate(conversion = sample(c(0, 1), n(), prob = c(0.975, 0.025), replace = TRUE)) %>%
-  ungroup() %>%
-  # dmap_at(c(1, 3), as.character) %>%
-  arrange(customer_id, date)
+df_int$conversion <- 0
 
-df_raw <- df_raw %>%
-  mutate(channel = ifelse(channel == 'channel_2', NA, channel))
+df_multi_paths <- rbind(df_int, df_conv)
 
-
-##### splitting paths #####
-df_paths <- df_raw %>%
-  group_by(customer_id) %>%
-  mutate(path_no = ifelse(is.na(lag(cumsum(conversion))), 0, lag(cumsum(conversion))) + 1) %>%
-  ungroup()
-
-# first purchases only
-df_paths_1 <- df_paths %>%
-  filter(path_no == 1) %>%
-  select(-path_no)
-
-##### replace some channels #####
-df_path_1_clean <- df_paths_1 %>%
-  # removing NAs
-  filter(!is.na(channel)) %>%
-  
-  # adding order of channels in the path
-  group_by(customer_id) %>%
-  mutate(ord = c(1:n()),
-         is_non_direct = ifelse(channel == 'channel_6', 0, 1),
-         is_non_direct_cum = cumsum(is_non_direct)) %>%
-  
-  # removing Direct (channel_6) when it is the first in the path
-  filter(is_non_direct_cum != 0) %>%
-  
-  # replacing Direct (channel_6) with the previous touch point
-  mutate(channel = ifelse(channel == 'channel_6', channel[which(channel != 'channel_6')][is_non_direct_cum], channel)) %>%
-  
-  ungroup() %>%
-  select(-ord, -is_non_direct, -is_non_direct_cum)
-
-
-##### one- and multi-channel paths #####
-
-df_path_1_clean <- df_path_1_clean %>%
-  group_by(customer_id) %>%
-  mutate(uniq_channel_tag = ifelse(length(unique(channel)) == 1, TRUE, FALSE)) %>%
-  ungroup()
-
-df_path_1_clean_uniq <- df_path_1_clean %>%
-  filter(uniq_channel_tag == TRUE) %>%
-  select(-uniq_channel_tag)
-
-df_path_1_clean_multi <- df_path_1_clean %>%
-  filter(uniq_channel_tag == FALSE) %>%
-  select(-uniq_channel_tag)
-
-### experiment ###
-# attribution model for all paths
-df_all_paths <- df_path_1_clean %>%
-  group_by(customer_id) %>%
+df_multi_paths_tl <- df_multi_paths %>%
+  group_by(client_id) %>%
   summarise(path = paste(channel, collapse = ' > '),
+            first_touch_date = min(date),
+            last_touch_date = max(date),
+            tot_time_lapse = round(as.numeric(last_touch_date - first_touch_date)),
             conversion = sum(conversion)) %>%
-  ungroup() %>%
-  filter(conversion == 1)
-
-mod_attrib <- markov_model(df_all_paths,
-                           var_path = 'path',
-                           var_conv = 'conversion',
-                           out_more = TRUE)
-mod_attrib$removal_effects
-mod_attrib$result
-d_all <- data.frame(mod_attrib$result)
-
-# attribution model for splitted multi and unique channel paths
-df_multi_paths <- df_path_1_clean_multi %>%
-  group_by(customer_id) %>%
-  summarise(path = paste(channel, collapse = ' > '),
-            conversion = sum(conversion)) %>%
-  ungroup() %>%
-  filter(conversion == 1)
-
-mod_attrib_alt <- markov_model(df_multi_paths,
-                               var_path = 'path',
-                               var_conv = 'conversion',
-                               out_more = TRUE)
-mod_attrib_alt$removal_effects
-mod_attrib_alt$result
-
-# adding unique paths
-df_uniq_paths <- df_path_1_clean_uniq %>%
-  filter(conversion == 1) %>%
-  group_by(channel) %>%
-  summarise(conversions = sum(conversion)) %>%
   ungroup()
 
-d_multi <- data.frame(mod_attrib_alt$result)
-d_multi$channel_name <- as.numeric(d_multi$channel_name)
+# distribution plot
+ggplot(df_multi_paths_tl %>% filter(conversion == 1), aes(x = tot_time_lapse)) +
+  theme_minimal() +
+  geom_histogram(fill = '#4e79a7', binwidth = 1)
 
-d_split <- full_join(d_multi, df_uniq_paths, by = c('channel_name' = 'channel')) %>%
-  mutate(result = total_conversions + conversions)
 
-# CHECK HERE!
-sum(d_all$total_conversions)
-sum(d_split$result)
+# cumulative distribution plot
+ggplot(df_multi_paths_tl %>% filter(conversion == 1), aes(x = tot_time_lapse)) +
+  theme_minimal() +
+  stat_ecdf(geom = 'step', color = '#4e79a7', size = 2, alpha = 0.7) +
+  geom_hline(yintercept = 0.95, color = '#e15759', size = 1.5) +
+  geom_vline(xintercept = 31, color = '#e15759', size = 1.5, linetype = 2)
