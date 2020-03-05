@@ -21,13 +21,7 @@ library(stringr)
 
 setwd('C:/Users/xqian/Documents/GitHub/mta-with-markov-chains')
 
-df1 <- read.csv('path to conversion.csv', stringsAsFactors = FALSE)
-lu <- read.csv('lookup placement.csv', stringsAsFactors = FALSE)
-
-df <- merge(df1, lu, by="Placement")
-
-df <- df[,c(2,3,4,5,6,12,13)]
-df <- df %>% filter(!Tactic %in% c('Tablet','Desktop','Incremental Cross Device'))
+df <- read.csv('path_to_conversion.csv', stringsAsFactors = FALSE)
 
 level <- 'Tactic'
 
