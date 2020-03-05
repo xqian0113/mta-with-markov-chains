@@ -18,6 +18,7 @@ library(markovchain)
 library(visNetwork)
 library(expm)
 library(stringr)
+library(googleVis)
 
 setwd('C:/Users/xqian/Documents/GitHub/mta-with-markov-chains')
 
@@ -157,3 +158,40 @@ ggplot(df_multi_paths_tl %>% filter(conversion == 1), aes(x = tot_time_lapse)) +
   stat_ecdf(geom = 'step', color = '#4e79a7', size = 2, alpha = 0.7) +
   geom_hline(yintercept = 0.95, color = '#e15759', size = 1.5) +
   geom_vline(xintercept = 31, color = '#e15759', size = 1.5, linetype = 2)
+
+##### Sankey diagram #####
+
+# DEDUPE CONSECUTIVE DUPLICATES
+df_multi_paths_tl$path2 <- strsplit(df_multi_paths_tl$path," > ")
+df_multi_paths_tl$path2 <- sapply(df_multi_paths_tl$path2,function(x) rle(x)$value)
+
+
+orders <- df_multi_paths_tl$path2
+
+orders.plot <- data.frame()
+
+for (j in 1:length(orders)) {
+ord.cache <- data.frame(matrix(ncol = 2, nrow = length(orders[[j]])-1))
+colnames(ord.cache)[1] <-'from'
+colnames(ord.cache)[2]<-'to'
+  
+for (i in 1:(length(orders[[j]])-1)) {
+  
+  ord.cache$from[i] <- orders[[j]][i]
+  ord.cache$to[i] <- orders[[j]][i+1]
+
+  # adding tags
+  ord.cache$from[i] <- paste0(ord.cache$from[i], '(', i, ')', sep='')
+  ord.cache$to[i] <- paste0(ord.cache$to[i], '(', i+1, ')', sep='')
+  
+}
+orders.plot <- rbind(orders.plot, ord.cache)
+}
+
+orders.plot1 <- orders.plot %>%
+  group_by(from,to) %>%
+  summarise(n=n())
+
+
+plot(gvisSankey(orders.plot1, from='from', to='to', weight='n',
+                options=list(height=900, width=1800, cex = 2,sankey="{link:{color:{fill:'lightblue'}}}")))
