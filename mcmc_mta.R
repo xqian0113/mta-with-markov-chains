@@ -35,8 +35,6 @@ df_conv$conversion_time <- as.POSIXct(df_conv$conversion_time, format="%m/%d/%Y 
 
 colnames(df_int) <- c('client_id','date','channel')
 
-##### simulating the "real" data####
-
 df_int$date <- as.POSIXct(df_int$date, format="%m/%d/%Y %H:%M", tz=Sys.timezone())
 
 # aggregating channels to the paths for each customer
